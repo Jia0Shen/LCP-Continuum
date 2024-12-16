@@ -1,5 +1,4 @@
-This code accompanies the paper "Friction Modeling of Continuum Robots Through
-Linear Complementarity Problem" (under review) by Jia Shen, Junhyoung Ha, and Yue Chen.  
+This code accompanies the paper "Friction Modeling of Continuum Robots Through Linear Complementarity Problem" (under review) by Jia Shen, Junhyoung Ha, and Yue Chen.  
 This code implements the friction model for continuum robots by solving the Linear Complementarity Problem (LCP). It includes simulations that reproduce the case studies presented in the associated paper. 
 The simulations are located in the "simulations" folder:
     - simu_ctr.m: A concentric tube robot (CTR) interacting with a plane.

@@ -43,8 +43,9 @@ function [g_in, shape, yu0_sol, b_res, g_arrays, ps_arrays] = three_tube_fk(ctr,
     ps_arrays = [x{1}', x{2}', x{3}'; y_1(:,1:3)', y_2(:,1:3)', y_3(:,1:3)'];
     b_res = x{7};
     if norm(b_res) > 1e-6
-        disp('forward kinematics not accurate: norm(b) = ' +string(norm(b_res)))
-        b_res
+        % disp('forward kinematics not accurate: norm(b) = ' +string(norm(b_res)))
+        warning('forward kinematics not accurate: norm(b) = ' +string(norm(b_res)))
+        % b_res
     end
 %     disp('yu_0_sol:'); disp(yu0_sol);
 %     disp('FK residual:'); disp(x{7});

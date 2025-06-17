@@ -78,7 +78,12 @@ function [state,contactFlag] = getFrictionalTipContactCTR(ctr, obs, q, state0, d
 
     dyu0 = - Bu \ (Bq*(q-q_prev) + Bw*(w-w_prev));  % see Caleb's paper
     yu0 = yu0_prev + dyu0;
-    [g_end, p, b_res, shape] = three_tube_ivp_forward(ctr, q, w, yu0);
+
+    % use this for faster speed
+    % [g_end, p, b_res, shape] = three_tube_ivp_forward(ctr, q, w, yu0);
+
+    % use this for better stability
+    [~, p, yu0, b_res, shape] = three_tube_fk(ctr, q, w, yu0);
 
     state.p = p;
     state.w = w;
@@ -88,7 +93,6 @@ function [state,contactFlag] = getFrictionalTipContactCTR(ctr, obs, q, state0, d
 
     % check the acc of compliance
     dp = Jc*(q-q_prev) + Cc*(f-f_prev);
-    % dp = Jc*(q-q_prev) + Cc*(f-f_prev);
     dp_num = p{3}(end,:)' - p_tip;
     % check if the contact is maintained.
     if fn > 1e-12

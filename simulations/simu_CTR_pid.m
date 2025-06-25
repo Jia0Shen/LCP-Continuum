@@ -161,18 +161,32 @@ state_est = state_st;
 state_traj = [];
 
 % change the COF
-plane.mu = 0.15;
+% plane.mu = 0.15;
+plane.mu = 0.1;
 
-for i = [1:7, 6, 5, 4, 3, 4, 5, 4]% [1:n_path, n_path-1:-1:1]
+switchFlag = false;
+
+pathIdx = [1:3,2,1,2];
+for i = 1:length(pathIdx)   % [1:7, 6, 5, 4, 3, 4, 5, 4]
 
     % find jacobian - dq
-    xd = x_path(:, i);
+    xd = x_path(:, pathIdx(i));
+
+    if i == 4 || i == 6
+        dt = 0;
+        disp(length(state_traj));
+    end
 
     for j = 1:nh
 
+        % siwtch small only for 20 steps.
+        if j > 10
+            dt = 0.001;
+        end
+
         % stop if reach the target.
         if norm(xd-xc) < 5e-4    % 0.5 mm accuracy
-            fprintf('Reached the %d-th target\n', i);
+            fprintf('Reached the %d-th/%d target\n', i, length(pathIdx));
             break
         end
 
@@ -195,6 +209,7 @@ for i = [1:7, 6, 5, 4, 3, 4, 5, 4]% [1:n_path, n_path-1:-1:1]
         % j_idx = 1:6;
         Jv = J(1:3,j_idx);
 
+        % Jv_inv = Jv'*(inv(Jv*Jv' + 0.00001 * eye(3)));   % singularity-robust
         Jv_inv = Jv'*(inv(Jv*Jv' + 0.00001 * eye(3)));   % singularity-robust
         % Jv_inv = pinv(Jv);   % singularity-robust
         dq_idx = Jv_inv*(dx+K*(xd-xc));
@@ -257,10 +272,10 @@ for i = [1:7, 6, 5, 4, 3, 4, 5, 4]% [1:n_path, n_path-1:-1:1]
         yu0_c = state_c.yu0;
         state_record = state_c;
         state_record.target = xd;
-        state_record.error = xd;
+        state_record.error = norm(xd-xc);
         state_record.g_est = state_est.g;
+        state_record.dt = dt;
         state_traj = [state_traj, state_record];
-
 
     end
 
@@ -343,12 +358,14 @@ close(vid1)
 
 tip_traj = [];
 tip_traj_est = [];
+q_plot = [];
 
 for ii = 1:n_traj
     stateii = state_traj(ii);
 
     tip_traj = [tip_traj, stateii.p{3}(end, :)'];
     tip_traj_est = [tip_traj_est, stateii.g_est{3}(end, 13:15)'];
+    q_plot = [q_plot, stateii.q];
 
 end
 
@@ -356,8 +373,14 @@ figure()
 hold on
 % plot(tip_traj_est(1, :))
 % plot(tip_traj_est(2, :))
-plot(tip_traj(1, :))
-plot(tip_traj(2, :))
+plot(tip_traj(1, :), '.')
+plot(tip_traj(2, :), '.')
+
+figure()
+hold on
+plot(q_plot(1,:), '.')
+plot(q_plot(3,:), '.')
+plot(q_plot(5,:), '.')
 
 %% legend
 

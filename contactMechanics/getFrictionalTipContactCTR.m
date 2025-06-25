@@ -84,6 +84,8 @@ function [state,contactFlag] = getFrictionalTipContactCTR(ctr, obs, q, state0, d
 
     % use this for better stability
     [~, p, yu0, b_res, shape] = three_tube_fk(ctr, q, w, yu0);
+    % [~, p, yu0, b_res, shape] = three_tube_fk(ctr, q, w, yu0_prev);
+    % [~, p_test, ~, b_res_test, ~] = three_tube_fk(ctr, q, w, yu0_prev);
 
     state.p = p;
     state.w = w;

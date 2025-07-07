@@ -296,8 +296,10 @@ n_traj = length(plot_traj);
 
 % close(vid1)
 
+totalTime = 10;
+
 vid1 = VideoWriter('simu_out/vid_ctr_pid2', 'MPEG-4');
-vid1.FrameRate = 50;
+vid1.FrameRate = round(n_traj/totalTime);
 open(vid1);
 
 figure()
@@ -315,10 +317,10 @@ axis equal
 % ylim([-axislim, axislim])
 xlim([-0.23, 0.02])
 ylim([-0.05, 0.2])
-zlim([-0.02, 0.52])
+zlim([-0.02, 0.5])
 
-% view(30,45)
-view(0, 90)
+view(0,60)
+% view(0, 90)
 
 h = plotPlane(plane, 0.5);
 h.FaceColor = 'k';
@@ -378,13 +380,21 @@ plot(t0, 1000*x_path(2, :), 'g--', 'LineWidth',2);
 plot(t0, 1000*tip_traj(2, :), 'r')
 xlabel('t (s)')
 ylabel('Y (mm)')
+xlim([-0.2 4])
+ylim([110 190])
+
+plotConfig2D([600 300])
+makeVid2D(gca, 'simu_out/vid_ctr_pid2_Y', 1)
 
 
-figure()
-hold on
-plot(t0, 1000*error_list)
-xlabel('t (s)')
-ylabel('Error (mm)')
+% figure()
+% hold on
+% plot(t0, 1000*error_list)
+% xlabel('t (s)')
+% ylabel('Error (mm)')
+
+% plotConfig2D([400 250])
+% makeVid2D(gca, 'simu_out/vid_ctr_pid2_Y')
 
 fprintf("Avg. tip error is %.3f mm, Max tip error is %.3f mm. \n", mean(1000*error_list), max(1000*error_list))
 
@@ -394,5 +404,5 @@ figure()
 hold on
 legend box off
 plot(nan, nan, 'r', 'LineWidth', 1)
-plot(nan, nan, 'b', 'LineWidth',1)
-legend('Friction model', 'Frictionless model')
+plot(nan, nan, 'g--', 'LineWidth',2)
+legend('Simulated trajectory', 'Desired trajectory')

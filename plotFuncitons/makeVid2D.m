@@ -1,16 +1,21 @@
-function vid = makeVid2D(axis_handle, path, sampleSkip)
+function vid = makeVid2D(axis_handle, path, lineSkipIdx)
+
+
+% make a list of plot handles to videos
+
+h_all = findobj(axis_handle, 'Type', 'line');
 
 if nargin == 2
-    sampleSkip = 1;
+    lineSkipIdx = 1:length(h_all);
 end
-% make a list of plot handles to videos
-h_list = findobj(axis_handle, 'Type', 'line');
+
+h_list = h_all(lineSkipIdx);
 h_circle = copyobj(h_list, axis_handle);
 h_copy = copy(h_list);
 
 dim_list = cellfun(@length,{h_list.XData});
 max_dim = max(dim_list);
-frameSample = 1:round(sampleSkip):max_dim;
+frameSample = 1:round(lineSkipIdx):max_dim;
 n_frames = length(frameSample);
 n = length(h_list);
 

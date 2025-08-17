@@ -90,59 +90,60 @@ state_prev = state_ini;
 
 d = 60;
 
-for i = 1:n1
-
-    qi = q_traj1(:, i);
-
-    if tipContact
-        % assume obs not moving here
-        [state_update,tipContact] = getFrictionalTipContactCTR(ctr, plane_fl, qi, state_prev, d);
-
-        state_prev = state_update;
-
-        p_tip = state_update.p{3}(end,:)';
-
-    else
-        [~, p, yu0, b_res, g] = three_tube_fk(ctr, qi, w0, yu0);
-
-        state_update.p = p;
-        state_update.w = w0;
-        state_update.yu0 = yu0;
-        state_update.q = qi;
-        state_update.g = g;
-
-        state_prev = state_update;
-
-        % check if tip contact
-        p_tip = p{3}(end,:)';
-
-        if plane.computeDepth(p_tip) >= 0
-            tipContact = true;
-        else
-            tipContact = false;
-        end
-
-    end
-
-    tip_traj_ini = [tip_traj_ini, p_tip];
-    state_traj_ini = [state_traj_ini, state_update];
-
-end
-
-tolTime = toc;
-
-% disp(n/tolTime)
-fprintf('Finished pushing in %.4f s, get normal force. \n', tolTime)
-
 
 % start the trajecotry
 % save 
-loadStates = false;
+loadStates = true;
 if loadStates
-    state_load = load("simu_out\ctr_pdi_ini.mat");
-    state_st = state_load.state_traj_ini(end);
+    load("simu_out\ctr_pdi_ini.mat");
+    state_st = state_traj_ini(end);
 else
-    save("simu_out\ctr_pdi_ini.mat", "state_traj_ini");
+
+    for i = 1:n1
+    
+        qi = q_traj1(:, i);
+    
+        if tipContact
+            % assume obs not moving here
+            [state_update,tipContact] = getFrictionalTipContactCTR(ctr, plane_fl, qi, state_prev, d);
+    
+            state_prev = state_update;
+    
+            p_tip = state_update.p{3}(end,:)';
+    
+        else
+            [~, p, yu0, b_res, g] = three_tube_fk(ctr, qi, w0, yu0);
+    
+            state_update.p = p;
+            state_update.w = w0;
+            state_update.yu0 = yu0;
+            state_update.q = qi;
+            state_update.g = g;
+    
+            state_prev = state_update;
+    
+            % check if tip contact
+            p_tip = p{3}(end,:)';
+    
+            if plane.computeDepth(p_tip) >= 0
+                tipContact = true;
+            else
+                tipContact = false;
+            end
+    
+        end
+    
+        tip_traj_ini = [tip_traj_ini, p_tip];
+        state_traj_ini = [state_traj_ini, state_update];
+    
+    end
+    
+    tolTime = toc;
+    
+    % disp(n/tolTime)
+    fprintf('Finished pushing in %.4f s, get normal force. \n', tolTime)
+
+    save("simu_out\ctr_pdi_ini.mat", "state_traj_ini", "tip_traj_ini");
     state_st = state_traj_ini(end);
 end
 
@@ -159,7 +160,7 @@ directSign = 1;   % +1 for CCW, -1 for CW.
 % thetas = linspace(theta0, theta0+2*directSign*pi, n_path);
 theta1 = theta0+directSign*pi*1/8;
 % thetas = LinearInterpl([theta0, theta1, theta0, theta1], 0.002);
-thetas = LinearInterpl([theta0, theta1, theta0], 0.002);
+thetas = LinearInterpl([theta0, theta1, theta0], 0.0005);
 n_path = length(thetas);
 x_path = [rp*cos(thetas); rp*sin(thetas); z_tip*ones(1,n_path)];
 
@@ -173,7 +174,12 @@ xc = tip_traj_ini(:,end);
 Jc = J(1:3,:);
 
 % gain
-K = 25*diag([1 1 1]);
+KP = 15*diag([1 1 1]);
+KI = 20*diag([1 1 1]);
+Ks = 0.9;
+err_int = zeros(3, 1);
+s = 0;
+
 dt = 0.01;  % 100 Hz
 tipContact = true;
 d = 60;
@@ -183,9 +189,12 @@ state_c = state_st;
 state_est = state_st;
 
 state_traj = [];
+s_list = [];
 
 % change the COF
 plane.mu = 0.37;
+
+dq_idx = [0 0 0]';
 
 for i = 1:n_path
 
@@ -194,8 +203,8 @@ for i = 1:n_path
 
     % opt 1: this assumes known tip position control.
     % dx = (xd-xc)/dt;   
-    
-    % % opt 2: this assumes open-loop control.
+
+    % opt 2: this assumes open-loop control.
     if i == 1
         dx = [0;0;0];
     else 
@@ -204,8 +213,13 @@ for i = 1:n_path
 
     % print 
     if mod(i, 50) == 0; fprintf("Finished %d/%d iterations. \n", i, n_path); end
-    
+
     [J, C, ~, ~, B] = cal_Jacobian_ivp_one(ctr_est, state_est.q, state_est.w, state_est.yu0);
+
+    % get updated Jacovian using LCP-model
+
+    % J_lcp = [];
+
     % [J, C, ~, ~, B] = cal_Jacobian_ivp_one(ctr, state_c.q, w_st, yu0_c);
 
     % use all 6 DOF for j_idx = 1:6;
@@ -213,10 +227,21 @@ for i = 1:n_path
     % j_idx = 1:6;
     Jv = J(1:3,j_idx);
 
-    % Jv_inv = Jv'*(inv(Jv*Jv' + 0.00001 * eye(3)));   % singularity-robust
     Jv_inv = Jv'*(inv(Jv*Jv' + 0.00001 * eye(3)));   % singularity-robust
-    % Jv_inv = pinv(Jv);   % singularity-robust
-    dq_idx = Jv_inv*(dx+K*(xd-xc));
+
+    % opt1 PID control
+    % err_int = err_int + (xd-xc)*dt;
+    % dq_idx = Jv_inv*(dx+KP*(xd-xc)+KI*err_int);
+
+    % opt2 Sliding mode control
+    sat = @(z, thres) min(max(z, -thres), thres);
+
+    s = Jv * dq_idx - dx + KP*(xc-xd);
+    % record s
+    s_list = [s_list, s];
+
+    dq_idx = Jv_inv*(dx+KP*(xd-xc)+Ks*sat(s, 0.1));
+    
     dq = zeros(6,1);
     dq(j_idx) = dq_idx;
 
@@ -225,24 +250,35 @@ for i = 1:n_path
 
     q_prev = qc;
     qc = q_prev + dq*dt;
+
     % qc = q_traj2;   % test a round traj
 
     % estimate shape using (inaccurate) model.
     % [~, p_est, yu0_c, b_est, g_est] = three_tube_fk(ctr, qc, w_st, yu0_c);
     % [~, p_est, yu0_c, b_est, g_est] = three_tube_fk(ctr, qc, state_c.w, state_c.yu0);
 
-
     % feed forward simulator (ground truth), noise included?
 
     state_prev = state_c;
     state_est_prev = state_est;
+
+    % update qc
+    % if i >= 198 && i <= 237
+    %     q_prev = qc;
+    %     qc = stepLCPControl(ctr, plane, xd, state_prev, d);
+    %     disp(i)
+    % else
+    %     q_prev = qc;
+    %     qc = q_prev + dq*dt;
+    % end
+
+
 
     if tipContact
         % assume obs not moving here
         [state_c,tipContact] = getFrictionalTipContactCTR(ctr, plane, qc, state_prev, d);
 
         % estimate the state using frictionless model
-        % [state_est,~] = getFrictionalTipContactCTR(ctr, plane, qc, state_est_prev, d);
         [state_est,~] = getFrictionalTipContactCTR(ctr_est, plane_fl, qc, state_est_prev, d);
 
         % state_prev = state_update;
@@ -271,6 +307,9 @@ for i = 1:n_path
 
     end
 
+    % update sliding mode control
+    % s = Jv * dq_idx - dx + KP*(xc-xd);
+
     % further update other states.
     % xc = p_tip;
     yu0_c = state_c.yu0;
@@ -283,15 +322,111 @@ for i = 1:n_path
 
 end
 
+%%
+
+tipContact = true;
+qc = q_st;
+yu0_c = yu0_st;
+state_c = state_st;
+state_est = state_st;
+state_traj_lcp = [];
+
+mpc_horizon = 5;
+
+for i = 1:n_path
+
+    % find jacobian - dq
+    xd = x_path(:, i);
+    
+    % feed forward simulator (ground truth), noise included?
+
+    state_prev = state_c;
+
+    % find qc given the desired next step
+    % [state_c,tipContact] = getFrictionalTipContactCTR(ctr, plane, qc, state_prev, d);
+
+    % if i >= 0
+    %     qc = stepLCPControl(ctr, plane, xd, state_prev, d);
+    % else
+    %     qc = state_traj(i).q;
+    % end
+
+    qc = stepLCPControl(ctr, plane, xd, state_prev, d);
+
+    % find qc using mpc
+    % if i <= n_path - mpc_horizon
+    %     xd_mpc = x_path(:, i-1+(1:mpc_horizon));   % i, i+1, ... steps
+    %     qc = stepLCPControl_mpc(ctr, plane, xd_mpc, state_prev, d);
+    % else
+    %     xd_mpc = x_path(:, i:n_path);   % i, i+1, ..., n_path
+    %     qc = stepLCPControl_mpc(ctr, plane, xd_mpc, state_prev, d);
+    % end
+
+    % compare with frictionless.
+    % qc_compare = state_traj(i).q;
+
+    if tipContact
+        % assume obs not moving here
+        [state_c,tipContact] = getFrictionalTipContactCTR(ctr, plane, qc, state_prev, d);
+
+        % state_prev = state_update;
+        xc = state_c.p{3}(end,:)';
+
+    else
+        % tip wrench is 0 if no contact.
+        [~, p, yu0, b_res, g] = three_tube_fk(ctr, qc, w0, yu0);
+
+        state_c.p = p;
+        state_c.w = w0;
+        state_c.yu0 = yu0;
+        state_c.q = qc;
+        state_c.g = g;
+
+        % state_prev = state_update;
+
+        % check if tip contact
+        xc = p{3}(end,:)';
+
+        if plane.computeDepth(xc) >= 0
+            tipContact = true;
+        else
+            tipContact = false;
+        end
+
+    end
+
+    % further update other states.
+    % xc = p_tip;
+    yu0_c = state_c.yu0;
+    state_record2 = state_c;
+    state_record2.target = xd;
+    state_record2.error = norm(xd-xc);
+    state_record2.g_est = [];
+    state_record2.dt = dt;
+    state_traj_lcp = [state_traj_lcp, state_record2];
+
+    % print 
+    if mod(i, 1) == 0; fprintf("Finished %d/%d iterations, error is %.6f. \n", i, n_path, norm(xd-xc)); end
+
+end
+
+save("simu_out\ctr_pid_traj.mat", 'state_traj_lcp', 'state_traj', 'x_path')
 
 %% plot the traj
 
 % plot_traj = [state_traj_ini, state_traj];
 % plot_traj = state_traj_ini;
-plot_traj = state_traj;
+
+% down sampled for visualization.
+idx_sampled = [1:20:n_path, n_path];
+
+plot_traj = state_traj(idx_sampled);
+plot_traj2 = state_traj_lcp(idx_sampled);
+
+% plot_traj = state_traj;
 
 plot_tip_traj = [];
-plot_tip_traj_est = [];
+plot_tip_traj2 = [];
 n_traj = length(plot_traj);
 
 % close(vid1)
@@ -299,7 +434,7 @@ n_traj = length(plot_traj);
 totalTime = 10;
 
 vid1 = VideoWriter('simu_out/vid_ctr_pid2', 'MPEG-4');
-vid1.FrameRate = round(n_traj/totalTime);
+vid1.FrameRate = min(round(n_traj/totalTime), 110);
 open(vid1);
 
 figure()
@@ -319,7 +454,7 @@ xlim([-0.23, 0.02])
 ylim([-0.05, 0.2])
 zlim([-0.02, 0.5])
 
-view(0,60)
+view(5,60)
 % view(0, 90)
 
 h = plotPlane(plane, 0.5);
@@ -328,20 +463,25 @@ h.FaceAlpha = 0.2;
 hs = []; ht = []; hs2 = []; ht2 = [];
 
 % plot path
-plot3(x_path(1,:), x_path(2,:), x_path(3,:), 'g--', 'LineWidth',2)
+plot3(x_path(1,idx_sampled), x_path(2,idx_sampled), x_path(3,idx_sampled), 'g--', 'LineWidth',2)
+
 
 for i = 1:n_traj
 
+    % statei = plot_traj(i);
     statei = plot_traj(i);
+    statei2 = plot_traj2(i);
+
     plot_tip_traj = [plot_tip_traj, statei.p{3}(end,:)'];
-    plot_tip_traj_est = [plot_tip_traj_est, statei.g_est{3}(end, 13:15)'];
+    plot_tip_traj2 = [plot_tip_traj2, statei2.p{3}(end,:)'];
+    % plot_tip_traj_est = [plot_tip_traj_est, statei.g_est{3}(end, 13:15)'];
 
     delete([hs hs2 ht ht2])
 
-    hs = simple_plot_ctr(statei.g, 1, 'r');
-    % hs2 = simple_plot_ctr(statei.g_est, 1, 'b');
-    ht = plot3Mat(plot_tip_traj, 'r');
-    % ht2 = plot3Mat(plot_tip_traj_est, 'b');
+    hs = simple_plot_ctr(statei.g, 1, 'b');
+    hs2 = simple_plot_ctr(statei2.g, 1, 'r');
+    ht = plot3Mat(plot_tip_traj, 'b', 1);
+    ht2 = plot3Mat(plot_tip_traj2, 'r', 1);
 
     writeVideo(vid1, getframe(gcf));
     
@@ -353,39 +493,65 @@ close(vid1)
 %% 2D plots
 
 tip_traj = [];
-tip_traj_est = [];
+tip_traj2 = [];
+% tip_traj_est = [];
 error_list = [];
+error_list2 = [];
 q_plot = [];
+q_plot2 = [];
 
 n_traj = length(plot_traj);
 
 for ii = 1:n_traj
-    stateii = state_traj(ii);
+    stateii = plot_traj(ii);
+    stateii2 = plot_traj2(ii);
 
     tip_traj = [tip_traj, stateii.p{3}(end, :)'];
-    tip_traj_est = [tip_traj_est, stateii.g_est{3}(end, 13:15)'];
+    tip_traj2 = [tip_traj2, stateii2.p{3}(end, :)'];
+
     q_plot = [q_plot, stateii.q];
+    q_plot2 = [q_plot2, stateii2.q];
+
     error_list = [error_list, stateii.error];
+    error_list2 = [error_list2, stateii2.error];
 
 end
 
 % time serial
-t0 = linspace(0, n_path*dt, n_path);
+t_total = 10;
+
+t0 = linspace(0, t_total, n_traj);
 
 figure()
 hold on
 % plot(tip_traj_est(1, :))
 % plot(tip_traj_est(2, :))
-plot(t0, 1000*x_path(2, :), 'g--', 'LineWidth',2);
-plot(t0, 1000*tip_traj(2, :), 'r')
+% plot(t0, 1000*x_path(2, :), 'g--', 'LineWidth',2);
+% plot(t0, 1000*tip_traj(2, :), 'r')
+plot(t0, 1000*x_path(2, idx_sampled), 'g--', 'LineWidth',2);
+plot(t0, 1000*tip_traj(2, :), 'b')
+plot(t0, 1000*tip_traj2(2, :), 'r')
 xlabel('t (s)')
 ylabel('Y (mm)')
-xlim([-0.2 4])
+% xlim([-0.2 4])
 ylim([110 190])
 
 plotConfig2D([600 300])
-makeVid2D(gca, 'simu_out/vid_ctr_pid2_Y', 1)
+makeVid2D(gca, 'simu_out/vid_ctr_pid2_Y', [1 2])
 
+
+figure()
+hold on
+plot(t0, q_plot([1 3 5], :)', 'b');
+plot(t0, q_plot2([1 3 5], :)', 'r');
+
+xlabel('t (s)')
+ylabel('Y (mm)')
+
+figure()
+hold on
+plot(s_list', 'r')
+plot([state_traj.error], 'b')
 
 % figure()
 % hold on
@@ -403,6 +569,102 @@ fprintf("Avg. tip error is %.3f mm, Max tip error is %.3f mm. \n", mean(1000*err
 figure()
 hold on
 legend box off
+plot(nan, nan, 'b', 'LineWidth', 1)
 plot(nan, nan, 'r', 'LineWidth', 1)
 plot(nan, nan, 'g--', 'LineWidth',2)
-legend('Simulated trajectory', 'Desired trajectory')
+legend('Cosserat-based control', 'LCP-based control', 'Desired trajectory')
+
+
+
+%%
+function q_sol = stepLCPControl(ctr, obj, x_desire, state_prev, d)
+
+qc0 = state_prev.q;
+
+    function y = obj_fun(q_135)
+
+    q_full = [q_135(1), 0, q_135(2), 0, q_135(3), 0]';
+
+    [state0, ~] = getFrictionalTipContactCTR(ctr, obj, q_full, state_prev, d);
+
+    % y = norm(x_desire - state0.p{3}(end,:)') + 0.01*norm(q_135-qc0([1 3 5])' );
+    y = norm(x_desire - state0.p{3}(end,:)');
+
+    end
+
+% q135_0 = [-4.7, -2.3, 0]';
+% q135_0 = qc0([1 3 5]) + 0.01*[1 1 1]';
+
+q135_0 = qc0([1 3 5]);
+
+opt = optimset('Display','none', 'TolX', 1e-5, "TolFun", 1e-5);
+
+AA = []; bb = []; 
+AAeq = []; bbeq = []; 
+% lb = [];
+% ub = []; 
+lb = q135_0 - 0.05*[1 1 1]';
+ub = q135_0 + 0.05*[1 1 1]'; 
+
+q135_sol = patternsearch(@obj_fun, q135_0, AA, bb, AAeq, bbeq, lb, ub, [], opt);
+% q135_sol = fminsearch(@obj_fun, q135_0, opt);
+
+% q135_0 = [-4.7, -2.3, 0]';
+% 
+% opt = optimoptions("fminunc", "Algorithm", "quasi-newton", "Display","iter", ...
+%     "ObjectiveLimit", 1e-5, 'UseParallel',false);
+% 
+% q135_sol = fminunc(@obj_fun, q135_0, opt);
+
+q_sol = [q135_sol(1), 0, q135_sol(2), 0, q135_sol(3), 0]';
+
+end
+
+
+function q_sol = stepLCPControl_mpc(ctr, obj, x_desire, state_prev0, d)
+
+nh = size(x_desire, 2);   % horizon
+
+    function y = obj_fun(q135_list_in)
+
+        % qc = q135_list(:, 1);
+        q135_list = reshape(q135_list_in, 3, nh);
+        tip_traj = [];
+
+        state_prev = state_prev0;
+
+        for it = 1:nh
+
+            qc135 = q135_list(:, it);
+            qc_full = [qc135(1), 0, qc135(2), 0, qc135(3), 0]';
+
+            [statec, ~] = getFrictionalTipContactCTR(ctr, obj, qc_full, state_prev, d);
+
+            % update states
+            state_prev = statec;
+
+            tip_traj = [tip_traj, statec.p{3}(end, :)'];
+        end
+
+        y = norm(x_desire - tip_traj);
+
+    end
+
+
+q_ini = repmat(state_prev0.q([1 3 5]), [nh, 1]);
+% q_ini = repmat([-4.7, -2.3, 0]', [1, nh]);
+
+opt = optimset('Display','iter');
+
+q135_sol = fminsearch(@obj_fun, q_ini, opt);
+
+% opt = optimoptions("fminunc", "Algorithm", "quasi-newton", "Display","none", ...
+%     "ObjectiveLimit", 1e-5);
+% 
+% q135_sol = fminunc(@obj_fun, q_ini, opt);
+
+% excute first step
+q_sol = [q135_sol(1,1), 0, q135_sol(2,1), 0, q135_sol(3,1), 0]';
+
+
+end
